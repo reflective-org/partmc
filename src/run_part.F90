@@ -66,6 +66,11 @@ module pmc_run_part
      integer :: nucleate_source
      !> Weight class of nucleation.
      integer :: nucleate_weight_class
+     !> Fixed H2SO4 concentration for binary nucleation (molecules m^{-3});
+     !> negative to use the gas state.
+     real(kind=dp) :: nucleate_h2so4_fixed_conc
+     !> Trace file for binary nucleation ("none" for no trace).
+     character(len=300) :: nucleate_trace_file
      !> Whether to do coagulation.
      logical :: do_coagulation
      !> Whether to do nucleation.
@@ -327,6 +332,8 @@ contains
          + pmc_mpi_pack_size_integer(val%nucleate_type) &
          + pmc_mpi_pack_size_integer(val%nucleate_source) &
          + pmc_mpi_pack_size_integer(val%nucleate_weight_class) &
+         + pmc_mpi_pack_size_real(val%nucleate_h2so4_fixed_conc) &
+         + pmc_mpi_pack_size_string(val%nucleate_trace_file) &
          + pmc_mpi_pack_size_logical(val%do_coagulation) &
          + pmc_mpi_pack_size_logical(val%do_nucleation) &
          + pmc_mpi_pack_size_logical(val%do_immersion_freezing) &
@@ -384,6 +391,8 @@ contains
     call pmc_mpi_pack_integer(buffer, position, val%nucleate_type)
     call pmc_mpi_pack_integer(buffer, position, val%nucleate_source)
     call pmc_mpi_pack_integer(buffer, position, val%nucleate_weight_class)
+    call pmc_mpi_pack_real(buffer, position, val%nucleate_h2so4_fixed_conc)
+    call pmc_mpi_pack_string(buffer, position, val%nucleate_trace_file)
     call pmc_mpi_pack_logical(buffer, position, val%do_coagulation)
     call pmc_mpi_pack_logical(buffer, position, val%do_nucleation)
     call pmc_mpi_pack_logical(buffer, position, val%do_immersion_freezing)
@@ -446,6 +455,8 @@ contains
     call pmc_mpi_unpack_integer(buffer, position, val%nucleate_type)
     call pmc_mpi_unpack_integer(buffer, position, val%nucleate_source)
     call pmc_mpi_unpack_integer(buffer, position, val%nucleate_weight_class)
+    call pmc_mpi_unpack_real(buffer, position, val%nucleate_h2so4_fixed_conc)
+    call pmc_mpi_unpack_string(buffer, position, val%nucleate_trace_file)
     call pmc_mpi_unpack_logical(buffer, position, val%do_coagulation)
     call pmc_mpi_unpack_logical(buffer, position, val%do_nucleation)
     call pmc_mpi_unpack_logical(buffer, position, val%do_immersion_freezing)
@@ -702,9 +713,13 @@ contains
     if (run_part_opt%do_nucleation) then
        call spec_file_read_nucleate_type(file, aero_data, &
             run_part_opt%nucleate_type, run_part_opt%nucleate_source, &
-            run_part_opt%nucleate_weight_class)
+            run_part_opt%nucleate_weight_class, &
+            run_part_opt%nucleate_h2so4_fixed_conc, &
+            run_part_opt%nucleate_trace_file)
     else
        run_part_opt%nucleate_type = NUCLEATE_TYPE_INVALID
+       run_part_opt%nucleate_h2so4_fixed_conc = -1d0
+       run_part_opt%nucleate_trace_file = "none"
     end if
     call spec_file_read_logical(file, 'do_immersion_freezing', &
            run_part_opt%do_immersion_freezing)
@@ -899,7 +914,8 @@ contains
        n_part_before = aero_state_total_particles(aero_state)
        call nucleate(run_part_opt%nucleate_type, &
             run_part_opt%nucleate_source, run_part_opt%nucleate_weight_class, &
-            env_state, gas_data, aero_data, &
+            run_part_opt%nucleate_h2so4_fixed_conc, &
+            run_part_opt%nucleate_trace_file, env_state, gas_data, aero_data, &
             aero_state, gas_state, run_part_opt%del_t, &
             run_part_opt%allow_doubling, run_part_opt%allow_halving)
        n_nuc = aero_state_total_particles(aero_state) &
