@@ -8,6 +8,10 @@
 ! article). Its coefficients are kept to the 17 digits the authors wrote
 ! (double-precision literals; the reference's default-REAL literals would
 ! round them to single precision) and its print warnings are removed.
+!
+! The Vehkamaki et al. (2002) coefficients below are those of the authors'
+! code at full precision, as carried by M7/ECHAM-HAM and the shared schemes
+! (harness/nucleation_schemes.py), written as double-precision literals.
 
 !> \file
 !> The pmc_nucleate_binary module.
@@ -19,7 +23,10 @@
 !! defined by the shared nucleation schemes of the aerosol box-model
 !! intercomparison (\c harness/nucleation_schemes.py). Units follow the
 !! Maattanen et al. (2018) reference code: concentrations in cm^{-3},
-!! rates in cm^{-3} s^{-1}, radii in m. Neutral channels only.
+!! rates in cm^{-3} s^{-1}, radii in m. Neutral channels only. Schemes:
+!! Maattanen et al. (2018) neutral, Dunne et al. (2016) binary-neutral
+!! and Vehkamaki et al. (2002), the latter unbounded or with its inputs
+!! bounded to the stated validity range.
 !!
 !! References:
 !!   - A. Maattanen, J. Merikanto, H. Henschel, J. Duplissy,
@@ -36,7 +43,8 @@
 !!     implications, <i>Geophys. Res. Lett.</i>, 24, 1931-1934.
 !!   - H. Vehkamaki et al. (2002), An improved parameterization for
 !!     sulfuric acid-water nucleation rates for tropospheric and
-!!     stratospheric conditions, <i>J. Geophys. Res.</i>, 107, 4622.
+!!     stratospheric conditions, <i>J. Geophys. Res.</i>, 107, 4622,
+!!     doi:10.1029/2002JD002184.
 module pmc_nucleate_binary
 
   use pmc_constants
@@ -64,6 +72,19 @@ module pmc_nucleate_binary
 
   !> Monomer radius of the Maattanen et al. (2018) kinetic regime (m).
   real(kind=dp), parameter :: NUCLEATE_MAATTANEN_MONOMER_RADIUS = 0.3d-9
+
+  !> Vehkamaki et al. (2002) stated validity: lowest temperature (K).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_TEMP_MIN = 230.15d0
+  !> Vehkamaki et al. (2002) stated validity: highest temperature (K).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_TEMP_MAX = 305.15d0
+  !> Vehkamaki et al. (2002) stated validity: lowest relative humidity (1).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_RH_MIN = 1d-4
+  !> Vehkamaki et al. (2002) stated validity: highest relative humidity (1).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_RH_MAX = 1d0
+  !> Vehkamaki et al. (2002) stated validity: lowest H2SO4 (cm^{-3}).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_H2SO4_MIN = 1d4
+  !> Vehkamaki et al. (2002) stated validity: highest H2SO4 (cm^{-3}).
+  real(kind=dp), parameter :: NUCLEATE_VEHKAMAKI_H2SO4_MAX = 1d11
 
 contains
 
@@ -430,6 +451,200 @@ contains
     kinetic = .false.
 
   end subroutine nucleate_binary_dunne2016
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Vehkamaki et al. (2002) fit: mole fraction of H2SO4 in the critical
+  !> cluster \f$x^*\f$, \f$\ln J\f$ (J in cm^{-3} s^{-1}) and
+  !> \f$\ln n_{\rm tot}\f$ at the given (already bounded) inputs.
+  !!
+  !! \f$\ln J\f$ and \f$\ln n_{\rm tot}\f$ use the unbounded \f$x^*\f$, as
+  !! the shared schemes do; callers bound \f$x^*\f$ afterwards.
+  subroutine nucleate_binary_vehkamaki2002_fit(t, s, c, x, lnj, lnn)
+
+    !> Temperature (K).
+    real(kind=dp), intent(in) :: t
+    !> Relative humidity (1), positive.
+    real(kind=dp), intent(in) :: s
+    !> Sulfuric acid concentration (cm^{-3}), positive.
+    real(kind=dp), intent(in) :: c
+    !> Mole fraction of H2SO4 in the critical cluster (unbounded).
+    real(kind=dp), intent(out) :: x
+    !> Natural logarithm of the nucleation rate (J in cm^{-3} s^{-1}).
+    real(kind=dp), intent(out) :: lnj
+    !> Natural logarithm of the total number of molecules in the cluster.
+    real(kind=dp), intent(out) :: lnn
+
+    real(kind=dp) :: ls, lr, ls2, ls3, lr2, lr3, t2, t3, ix
+
+    ls = log(s)
+    lr = log(c)
+    ls2 = ls * ls
+    ls3 = ls * ls * ls
+    lr2 = lr * lr
+    lr3 = lr * lr * lr
+    t2 = t * t
+    t3 = t * t * t
+    x = 0.7409967177282139d0 - 0.002663785665140117d0*t &
+         + 0.002010478847383187d0*ls - 0.0001832894131464668d0*t*ls &
+         + 0.001574072538464286d0*ls2 - 0.00001790589121766952d0*t*ls2 &
+         + 0.0001844027436573778d0*ls3 - 1.503452308794887d-6*t*ls3 &
+         - 0.003499978417957668d0*lr + 0.0000504021689382576d0*t*lr
+    ix = 1d0 / x
+    lnj = 0.1430901615568665d0 + 2.219563673425199d0*t &
+         - 0.02739106114964264d0*t2 + 0.00007228107239317088d0*t3 &
+         + 5.91822263375044d0*ix + 0.1174886643003278d0*ls &
+         + 0.4625315047693772d0*t*ls - 0.01180591129059253d0*t2*ls &
+         + 0.0000404196487152575d0*t3*ls + (15.79628615047088d0*ls)*ix &
+         - 0.215553951893509d0*ls2 - 0.0810269192332194d0*t*ls2 &
+         + 0.001435808434184642d0*t2*ls2 - 4.775796947178588d-6*t3*ls2 &
+         - (2.912974063702185d0*ls2)*ix - 3.588557942822751d0*ls3 &
+         + 0.04950795302831703d0*t*ls3 - 0.0002138195118737068d0*t2*ls3 &
+         + 3.108005107949533d-7*t3*ls3 - (0.02933332747098296d0*ls3)*ix &
+         + 1.145983818561277d0*lr - 0.6007956227856778d0*t*lr &
+         + 0.00864244733283759d0*t2*lr - 0.00002289467254710888d0*t3*lr &
+         - (8.44984513869014d0*lr)*ix + 2.158548369286559d0*ls*lr &
+         + 0.0808121412840917d0*t*ls*lr - 0.0004073815255395214d0*t2*ls*lr &
+         - 4.019572560156515d-7*t3*ls*lr + (0.7213255852557236d0*ls*lr)*ix &
+         + 1.62409850488771d0*ls2*lr - 0.01601062035325362d0*t*ls2*lr &
+         + 0.00003771238979714162d0*t2*ls2*lr &
+         + 3.217942606371182d-8*t3*ls2*lr &
+         - (0.01132550810022116d0*ls2*lr)*ix + 9.71681713056504d0*lr2 &
+         - 0.1150478558347306d0*t*lr2 + 0.0001570982486038294d0*t2*lr2 &
+         + 4.009144680125015d-7*t3*lr2 + (0.7118597859976135d0*lr2)*ix &
+         - 1.056105824379897d0*ls*lr2 + 0.00903377584628419d0*t*ls*lr2 &
+         - 0.00001984167387090606d0*t2*ls*lr2 &
+         + 2.460478196482179d-8*t3*ls*lr2 &
+         - (0.05790872906645181d0*ls*lr2)*ix - 0.1487119673397459d0*lr3 &
+         + 0.002835082097822667d0*t*lr3 - 9.24618825471694d-6*t2*lr3 &
+         + 5.004267665960894d-9*t3*lr3 - (0.01270805101481648d0*lr3)*ix
+    lnn = -0.002954125078716302d0 - 0.0976834264241286d0*t &
+         + 0.001024847927067835d0*t2 - 2.186459697726116d-6*t3 &
+         - 0.1017165718716887d0*ix - 0.002050640345231486d0*ls &
+         - 0.007585041382707174d0*t*ls + 0.0001926539658089536d0*t2*ls &
+         - 6.70429719683894d-7*t3*ls - (0.2557744774673163d0*ls)*ix &
+         + 0.003223076552477191d0*ls2 + 0.000852636632240633d0*t*ls2 &
+         - 0.00001547571354871789d0*t2*ls2 + 5.666608424980593d-8*t3*ls2 &
+         + (0.03384437400744206d0*ls2)*ix + 0.04743226764572505d0*ls3 &
+         - 0.0006251042204583412d0*t*ls3 + 2.650663328519478d-6*t2*ls3 &
+         - 3.674710848763778d-9*t3*ls3 - (0.0002672510825259393d0*ls3)*ix &
+         - 0.01252108546759328d0*lr + 0.005806550506277202d0*t*lr &
+         - 0.0001016735312443444d0*t2*lr + 2.881946187214505d-7*t3*lr &
+         + (0.0942243379396279d0*lr)*ix - 0.0385459592773097d0*ls*lr &
+         - 0.0006723156277391984d0*t*ls*lr + 2.602884877659698d-6*t2*ls*lr &
+         + 1.194163699688297d-8*t3*ls*lr &
+         - (0.00851515345806281d0*ls*lr)*ix - 0.01837488495738111d0*ls2*lr &
+         + 0.0001720723574407498d0*t*ls2*lr &
+         - 3.717657974086814d-7*t2*ls2*lr &
+         - 5.148746022615196d-10*t3*ls2*lr &
+         + (0.0002686602132926594d0*ls2*lr)*ix - 0.06199739728812199d0*lr2 &
+         + 0.000906958053583576d0*t*lr2 - 9.11727926129757d-7*t2*lr2 &
+         - 5.367963396508457d-9*t3*lr2 - (0.007742343393937707d0*lr2)*ix &
+         + 0.0121827103101659d0*ls*lr2 - 0.0001066499571188091d0*t*ls*lr2 &
+         + 2.534598655067518d-7*t2*ls*lr2 &
+         - 3.635186504599571d-10*t3*ls*lr2 &
+         + (0.0006100650851863252d0*ls*lr2)*ix &
+         + 0.0003201836700403512d0*lr3 - 0.0000174761713262546d0*t*lr3 &
+         + 6.065037668052182d-8*t2*lr3 - 1.421771723004557d-11*t3*lr3 &
+         + (0.0001357509859501723d0*lr3)*ix
+
+  end subroutine nucleate_binary_vehkamaki2002_fit
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Vehkamaki et al. (2002) binary H2SO4-H2O nucleation rate and critical
+  !> cluster.
+  !!
+  !! With \c clamp the inputs are first bounded to the stated validity
+  !! range (T 230.15-305.15 K, RH 1e-4-1, [H2SO4] 1e4-1e11 cm^{-3});
+  !! without it the fit is evaluated at the actual inputs (extrapolating
+  !! outside that range) and only the logarithms are protected (RH and
+  !! [H2SO4] floored at 1e-30). \f$x^*\f$ is bounded to [1e-30, 1] after
+  !! the fit, rates below 1e-7 cm^{-3} s^{-1} or with [H2SO4] <= 0 are set
+  !! to zero, and the cluster holds at least one acid molecule. No model's
+  !! extra rules (minimum cluster size, rate cap) are applied.
+  subroutine nucleate_binary_vehkamaki2002_cluster(temp, rh, h2so4, clamp, &
+       jnuc, ntot, x, na, rc)
+
+    !> Temperature (K).
+    real(kind=dp), intent(in) :: temp
+    !> Relative humidity over liquid water (1).
+    real(kind=dp), intent(in) :: rh
+    !> Sulfuric acid concentration (cm^{-3}).
+    real(kind=dp), intent(in) :: h2so4
+    !> Whether to bound the inputs to the stated validity range.
+    logical, intent(in) :: clamp
+    !> Nucleation rate (cm^{-3} s^{-1}).
+    real(kind=dp), intent(out) :: jnuc
+    !> Total number of molecules in the critical cluster.
+    real(kind=dp), intent(out) :: ntot
+    !> Mole fraction of H2SO4 in the critical cluster.
+    real(kind=dp), intent(out) :: x
+    !> Sulfuric acid molecules in the critical cluster.
+    real(kind=dp), intent(out) :: na
+    !> Radius of the critical cluster (m).
+    real(kind=dp), intent(out) :: rc
+
+    real(kind=dp) :: t, s, c, lnj, lnn
+
+    if (clamp) then
+       t = min(max(temp, NUCLEATE_VEHKAMAKI_TEMP_MIN), &
+            NUCLEATE_VEHKAMAKI_TEMP_MAX)
+       s = min(max(rh, NUCLEATE_VEHKAMAKI_RH_MIN), NUCLEATE_VEHKAMAKI_RH_MAX)
+       c = min(max(h2so4, NUCLEATE_VEHKAMAKI_H2SO4_MIN), &
+            NUCLEATE_VEHKAMAKI_H2SO4_MAX)
+    else
+       t = temp
+       s = max(rh, 1d-30)
+       c = max(h2so4, 1d-30)
+    end if
+    call nucleate_binary_vehkamaki2002_fit(t, s, c, x, lnj, lnn)
+    x = min(max(x, 1d-30), 1d0)
+    jnuc = exp(lnj)
+    if ((jnuc < 1d-7) .or. (h2so4 <= 0d0)) jnuc = 0d0
+    ntot = exp(lnn)
+    rc = 1d-9 * exp(-1.6524245d0 + 0.42316402d0 * x &
+         + 0.33466487d0 * log(ntot))
+    na = max(x * ntot, 1d0)
+
+  end subroutine nucleate_binary_vehkamaki2002_cluster
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Vehkamaki et al. (2002) formation rate and new particle: the critical
+  !> cluster (at least one acid molecule, total molecules at least the
+  !> acid molecules). See nucleate_binary_vehkamaki2002_cluster() for
+  !> \c clamp.
+  subroutine nucleate_binary_vehkamaki2002(temp, rh, h2so4, clamp, rate, &
+       n_acid, n_total, radius, kinetic)
+
+    !> Temperature (K).
+    real(kind=dp), intent(in) :: temp
+    !> Relative humidity over liquid water (1).
+    real(kind=dp), intent(in) :: rh
+    !> Sulfuric acid concentration (cm^{-3}).
+    real(kind=dp), intent(in) :: h2so4
+    !> Whether to bound the inputs to the stated validity range.
+    logical, intent(in) :: clamp
+    !> Formation rate (cm^{-3} s^{-1}).
+    real(kind=dp), intent(out) :: rate
+    !> H2SO4 molecules per new particle.
+    real(kind=dp), intent(out) :: n_acid
+    !> H2SO4 + H2O molecules per new particle.
+    real(kind=dp), intent(out) :: n_total
+    !> Wet radius of the new particle (m).
+    real(kind=dp), intent(out) :: radius
+    !> Always false (no kinetic branch).
+    logical, intent(out) :: kinetic
+
+    real(kind=dp) :: ntot, x
+
+    call nucleate_binary_vehkamaki2002_cluster(temp, rh, h2so4, clamp, rate, &
+         ntot, x, n_acid, radius)
+    n_total = max(ntot, n_acid)
+    kinetic = .false.
+
+  end subroutine nucleate_binary_vehkamaki2002
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 

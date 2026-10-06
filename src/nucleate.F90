@@ -23,6 +23,12 @@ module pmc_nucleate
   integer, parameter :: NUCLEATE_TYPE_MAATTANEN2018 = 2
   !> Type code for Dunne et al. (2016) binary-neutral H2SO4-H2O nucleation.
   integer, parameter :: NUCLEATE_TYPE_DUNNE2016 = 3
+  !> Type code for Vehkamaki et al. (2002) binary H2SO4-H2O nucleation,
+  !> evaluated at the actual inputs.
+  integer, parameter :: NUCLEATE_TYPE_VEHKAMAKI2002 = 4
+  !> Type code for Vehkamaki et al. (2002) binary H2SO4-H2O nucleation
+  !> with the inputs bounded to the stated validity range.
+  integer, parameter :: NUCLEATE_TYPE_VEHKAMAKI2002_CLAMPED = 5
 
   !> Source name for nucleated particles.
   character(len=AERO_SOURCE_NAME_LEN), parameter :: NUCLEATE_SOURCE_NAME &
@@ -71,7 +77,9 @@ contains
             env_state, gas_data, aero_data, aero_state, gas_state, del_t, &
             allow_doubling, allow_halving)
     elseif ((nucleate_type == NUCLEATE_TYPE_MAATTANEN2018) &
-         .or. (nucleate_type == NUCLEATE_TYPE_DUNNE2016)) then
+         .or. (nucleate_type == NUCLEATE_TYPE_DUNNE2016) &
+         .or. (nucleate_type == NUCLEATE_TYPE_VEHKAMAKI2002) &
+         .or. (nucleate_type == NUCLEATE_TYPE_VEHKAMAKI2002_CLAMPED)) then
        call nucleate_binary_h2so4(nucleate_type, nucleate_source, &
             nucleate_h2so4_fixed_conc, nucleate_trace_file, env_state, &
             gas_data, aero_data, aero_state, gas_state, del_t, &
@@ -202,8 +210,8 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !> Nucleate neutral binary H2SO4-H2O particles for time \c del_t, with
-  !> the Maattanen et al. (2018) or Dunne et al. (2016) scheme of
-  !> pmc_nucleate_binary.
+  !> the Maattanen et al. (2018), Dunne et al. (2016) or Vehkamaki et al.
+  !> (2002) scheme of pmc_nucleate_binary.
   !!
   !! The scheme gives the formation rate \f$J\f$ together with the
   !! particle it forms (acid molecules \f$n_a\f$ and total molecules
@@ -234,8 +242,9 @@ contains
        h2so4_fixed_conc, trace_file, env_state, gas_data, aero_data, &
        aero_state, gas_state, del_t, allow_doubling, allow_halving)
 
-    !> Type of nucleation (NUCLEATE_TYPE_MAATTANEN2018 or
-    !> NUCLEATE_TYPE_DUNNE2016).
+    !> Type of nucleation (NUCLEATE_TYPE_MAATTANEN2018,
+    !> NUCLEATE_TYPE_DUNNE2016, NUCLEATE_TYPE_VEHKAMAKI2002 or
+    !> NUCLEATE_TYPE_VEHKAMAKI2002_CLAMPED).
     integer, intent(in) :: nucleate_type
     !> Nucleate source number.
     integer, intent(in) :: nucleate_source
@@ -300,6 +309,14 @@ contains
        call nucleate_binary_dunne2016(env_state%temp, env_state%rel_humid, &
             h2so4_conc * 1d-6, rate_cm3, n_acid, n_total, scheme_radius, &
             kinetic)
+    elseif (nucleate_type == NUCLEATE_TYPE_VEHKAMAKI2002) then
+       call nucleate_binary_vehkamaki2002(env_state%temp, &
+            env_state%rel_humid, h2so4_conc * 1d-6, .false., rate_cm3, &
+            n_acid, n_total, scheme_radius, kinetic)
+    elseif (nucleate_type == NUCLEATE_TYPE_VEHKAMAKI2002_CLAMPED) then
+       call nucleate_binary_vehkamaki2002(env_state%temp, &
+            env_state%rel_humid, h2so4_conc * 1d-6, .true., rate_cm3, &
+            n_acid, n_total, scheme_radius, kinetic)
     else
        call die_msg(301928377, "unknown binary nucleation type: " &
             // trim(integer_to_string(nucleate_type)))
@@ -413,13 +430,15 @@ contains
     !!   - \b nucleate (string): the type of nucleation
     !!     parameterization --- must be one of: "none" for no
     !!     nucleation; "sulf_acid" for the nucleate_sulf_acid()
-    !!     parameterization; or "maattanen2018" or "dunne2016" for the
-    !!     neutral binary H2SO4-H2O schemes of nucleate_binary_h2so4()
-    !!     (Maattanen et al. 2018 neutral channel; Dunne et al. 2016
-    !!     binary-neutral channel), which require H2SO4 as a gas species
-    !!     and SO4 and H2O as aerosol species
+    !!     parameterization; or "maattanen2018", "dunne2016",
+    !!     "vehkamaki2002" or "vehkamaki2002_clamped" for the neutral
+    !!     binary H2SO4-H2O schemes of nucleate_binary_h2so4() (Maattanen
+    !!     et al. 2018 neutral channel; Dunne et al. 2016 binary-neutral
+    !!     channel; Vehkamaki et al. 2002 at the actual inputs, or with
+    !!     the inputs bounded to its stated validity range), which require
+    !!     H2SO4 as a gas species and SO4 and H2O as aerosol species
     !!
-    !! If \c nucleate is "maattanen2018" or "dunne2016" then the
+    !! If \c nucleate is one of the binary H2SO4-H2O types then the
     !! following parameters must also be provided:
     !!   - \b nucleate_h2so4_fixed_conc (real, unit molecules m^{-3}):
     !!     if non-negative, the gas-phase H2SO4 concentration is reset to
@@ -441,6 +460,10 @@ contains
        nucleate_type = NUCLEATE_TYPE_MAATTANEN2018
     elseif (nucleate_type_name == 'dunne2016') then
        nucleate_type = NUCLEATE_TYPE_DUNNE2016
+    elseif (nucleate_type_name == 'vehkamaki2002') then
+       nucleate_type = NUCLEATE_TYPE_VEHKAMAKI2002
+    elseif (nucleate_type_name == 'vehkamaki2002_clamped') then
+       nucleate_type = NUCLEATE_TYPE_VEHKAMAKI2002_CLAMPED
     else
        call spec_file_die_msg(707263678, file, "unknown nucleate type: " &
             // trim(nucleate_type_name))
