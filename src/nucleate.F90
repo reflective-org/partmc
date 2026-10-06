@@ -337,6 +337,9 @@ contains
           call aero_particle_zero(aero_particle, aero_data)
           call aero_particle_set_component(aero_particle, nucleate_source, &
                env_state%elapsed_time)
+          ! one primary particle, as for sampled particles (the native
+          ! nucleate_sulf_acid() leaves it at zero, which coagulation rejects)
+          aero_particle%n_primary_parts = 1
           aero_particle%vol(i_aero_so4) = so4_vol
           aero_particle%vol(i_aero_h2o) = h2o_vol
           call aero_particle_new_id(aero_particle)
